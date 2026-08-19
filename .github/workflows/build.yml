@@ -1,0 +1,130 @@
+name: Build Handy fleet packages
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # daily, 14:00 UTC — an hour after the internal watcher
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # to publish this repo's own release
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.verify.outputs.ready }}
+      tag: ${{ steps.verify.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install minisign
+        run: sudo apt-get update && sudo apt-get install -y minisign
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify upstream release
+        id: verify
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 scripts/verify_release.py
+
+      - name: Upload verified assets
+        if: steps.verify.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: verified-assets
+          path: verified/
+          retention-days: 1
+
+  build-pkg:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: macos-latest
+    strategy:
+      matrix:
+        arch: [aarch64, x64]
+    steps:
+      - name: Download verified assets
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-assets
+          path: verified
+
+      - name: Build .pkg
+        run: |
+          set -euo pipefail
+          mkdir -p root/Applications
+          tar -xzf "verified/Handy_${{ matrix.arch }}.app.tar.gz" -C root/Applications
+          BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw root/Applications/Handy.app/Contents/Info.plist)
+          VERSION=$(plutil -extract CFBundleShortVersionString raw root/Applications/Handy.app/Contents/Info.plist)
+          pkgbuild --root root --identifier "$BUNDLE_ID" --version "$VERSION" \
+            --install-location /Applications "Handy-${VERSION}-${{ matrix.arch }}.pkg"
+          echo "PKG_PATH=Handy-${VERSION}-${{ matrix.arch }}.pkg" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: ${{ env.PKG_PATH }}
+          retention-days: 1
+
+  build-intunewin:
+    needs: check
+    if: needs.check.outputs.ready == 'true'
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        arch: [arm64, x64]
+    steps:
+      - name: Download verified assets
+        uses: actions/download-artifact@v4
+        with:
+          name: verified-assets
+          path: verified
+
+      - name: Download IntuneWinAppUtil
+        shell: bash
+        run: curl -sL -o IntuneWinAppUtil.exe https://raw.githubusercontent.com/microsoft/Microsoft-Win32-Content-Prep-Tool/master/IntuneWinAppUtil.exe
+
+      - name: Build .intunewin
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.check.outputs.tag }}"
+          VERSION="${VERSION#v}"
+          SETUP_FILE="Handy_${VERSION}_${{ matrix.arch }}-setup.exe"
+          mkdir -p source output
+          cp "verified/${SETUP_FILE}" "source/${SETUP_FILE}"
+          ./IntuneWinAppUtil.exe -c source -s "${SETUP_FILE}" -o output -q
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: intunewin-${{ matrix.arch }}
+          path: output/*.intunewin
+          retention-days: 1
+
+  publish:
+    needs: [check, build-pkg, build-intunewin]
+    if: needs.check.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ needs.check.outputs.tag }}"
+          gh release create "$TAG" \
+            --repo "${{ github.repository }}" \
+            --title "Handy ${TAG} (packaged)" \
+            --notes "Verified upstream Handy ${TAG}: minisign signature checked, packaged as .pkg (macOS) and .intunewin (Windows) for internal fleet deployment. See manifest.json for checksums." \
+            artifacts/*.pkg artifacts/*.intunewin artifacts/manifest.json
