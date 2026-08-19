@@ -149,10 +149,16 @@ def main():
     for name, url in assets.items():
         if name.endswith(".sig") or name == "latest.json":
             continue
-        # Only what pkgbuild/IntuneWinAppUtil actually need — skip the
-        # ~600MB of Linux .rpm/.deb/.AppImage/.dmg/.msi assets this repo
-        # never touches.
-        if not (name.endswith(".app.tar.gz") or name.endswith("-setup.exe")):
+        # .app.tar.gz + -setup.exe are needed to build .pkg/.intunewin;
+        # .dmg/.msi are published as-is alongside them for anyone who wants
+        # the original installer. Skip the ~500MB of Linux .rpm/.deb/
+        # .AppImage assets this repo never touches.
+        if not (
+            name.endswith(".app.tar.gz")
+            or name.endswith("-setup.exe")
+            or name.endswith(".dmg")
+            or name.endswith(".msi")
+        ):
             continue
         dest = os.path.join(DOWNLOAD_DIR, name)
         download(url, dest)

@@ -126,5 +126,5 @@ jobs:
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "Handy ${TAG} (packaged)" \
-            --notes "Verified upstream Handy ${TAG}: minisign signature checked, packaged as .pkg (macOS) and .intunewin (Windows) for internal fleet deployment. See manifest.json for checksums." \
-            artifacts/*.pkg artifacts/*.intunewin artifacts/manifest.json
+            --notes "Verified upstream Handy ${TAG}: minisign signature checked. Includes packaged .pkg (macOS) / .intunewin (Windows) for internal fleet deployment, plus the original .dmg/.exe/.msi installers as published upstream. See manifest.json for checksums." \
+            artifacts/*.pkg artifacts/*.intunewin artifacts/*.dmg artifacts/*.exe artifacts/*.msi artifacts/manifest.json
