@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX MSI wrapper for the Handy NSIS installer.
+  Embeds the upstream .exe and runs it silently on install/uninstall.
+  This preserves the upstream signing identity while giving Intune
+  a proper MSI with product code detection and msiexec support.
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Handy"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="cjpais (packaged by DigitalOcean IT)"
+           UpgradeCode="8A2E4F6B-3C1D-4E5F-9A7B-0D2E6F8A1C3E">
+
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine"
+             Description="Handy $(var.Version) speech-to-text tool"
+             Comments="Wrapped NSIS installer for Intune deployment" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Handy is already installed."
+                  AllowSameVersionUpgrades="yes" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="TempFolder">
+        <Component Id="EmbeddedInstaller" Guid="1B3D5F7A-9C2E-4A6B-8D0F-2E4A6C8B0D1F">
+          <File Id="HandySetup" Source="$(var.SetupExe)" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Complete" Level="1">
+      <ComponentRef Id="EmbeddedInstaller" />
+    </Feature>
+
+    <!-- Run NSIS installer silently after files are placed -->
+    <CustomAction Id="InstallHandy"
+                  FileKey="HandySetup"
+                  ExeCommand="/S /D=&quot;C:\Program Files\Handy&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check" />
+
+    <!-- Run uninstaller silently on removal -->
+    <CustomAction Id="UninstallHandy"
+                  Directory="TempFolder"
+                  ExeCommand="cmd /c &quot;&quot;C:\Program Files\Handy\uninstall.exe&quot; /S&quot;"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="InstallHandy" After="InstallFiles">NOT Installed OR REINSTALL</Custom>
+      <Custom Action="UninstallHandy" Before="RemoveFiles">REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE</Custom>
+    </InstallExecuteSequence>
+
+  </Product>
+</Wix>

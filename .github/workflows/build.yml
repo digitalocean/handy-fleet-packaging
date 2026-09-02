@@ -3,6 +3,8 @@ name: Build Handy fleet packages
 on:
   schedule:
     - cron: "0 14 * * *"
+  repository_dispatch:
+    types: [new-upstream-release]
   workflow_dispatch: {}
 
 concurrency:
@@ -70,21 +72,37 @@ jobs:
     if: needs.check.outputs.ready == 'true'
     runs-on: windows-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: verified-assets
           path: verified
+      - name: Build MSI wrapper
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.check.outputs.tag }}"
+          VERSION="${VERSION#v}"
+          SETUP_FILE="Handy_${VERSION}_x64-setup.exe"
+
+          # Build MSI that wraps the NSIS exe
+          candle.exe -dVersion="${VERSION}.0" -dSetupExe="verified/${SETUP_FILE}" \
+            -out handy.wixobj scripts/handy-wrapper.wxs
+          light.exe -out "Handy_${VERSION}_x64.msi" handy.wixobj \
+            -ext WixUIExtension -sval
+
+          echo "MSI_FILE=Handy_${VERSION}_x64.msi" >> "$GITHUB_ENV"
+          echo "SETUP_FILE=${SETUP_FILE}" >> "$GITHUB_ENV"
       - name: Build .intunewin
         shell: bash
         run: |
           set -euo pipefail
           curl -sL -o IntuneWinAppUtil.exe https://raw.githubusercontent.com/microsoft/Microsoft-Win32-Content-Prep-Tool/master/IntuneWinAppUtil.exe
-          VERSION="${{ needs.check.outputs.tag }}"
-          VERSION="${VERSION#v}"
-          SETUP_FILE="Handy_${VERSION}_x64-setup.exe"
           mkdir -p source output
-          cp "verified/${SETUP_FILE}" "source/${SETUP_FILE}"
-          ./IntuneWinAppUtil.exe -c source -s "${SETUP_FILE}" -o output -q
+          cp "${{ env.MSI_FILE }}" "source/"
+          # Include the exe alongside so the MSI can find it during install
+          cp "verified/${{ env.SETUP_FILE }}" "source/"
+          ./IntuneWinAppUtil.exe -c source -s "${{ env.MSI_FILE }}" -o output -q
       - uses: actions/upload-artifact@v4
         with:
           name: intunewin-x64
@@ -117,16 +135,3 @@ jobs:
             artifacts/*.dmg artifacts/*.exe artifacts/*.msi \
             artifacts/manifest.json
 
-      - name: Dispatch to internal pipeline
-        if: success()
-        env:
-          DISPATCH_TOKEN: ${{ secrets.INTERNAL_DISPATCH_TOKEN }}
-        run: |
-          [ -z "$DISPATCH_TOKEN" ] && exit 0
-          TAG="${{ needs.check.outputs.tag }}"
-          MANIFEST_SHA=$(sha256sum artifacts/manifest.json | cut -d' ' -f1)
-          curl -fsS -X POST \
-            -H "Authorization: Bearer $DISPATCH_TOKEN" \
-            -H "Accept: application/vnd.github+json" \
-            "${{ secrets.INTERNAL_API_URL }}/repos/${{ secrets.INTERNAL_REPO }}/dispatches" \
-            -d "{\"event_type\":\"new-release\",\"client_payload\":{\"tag\":\"$TAG\",\"manifest_sha256\":\"$MANIFEST_SHA\"}}"

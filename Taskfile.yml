@@ -1,0 +1,23 @@
+version: "3"
+
+tasks:
+  validate:
+    desc: Validate workflow YAML
+    cmds:
+      - python3 -c "import yaml; yaml.safe_load(open('.github/workflows/build.yml'))"
+      - echo "workflow valid"
+
+  test-verify:
+    desc: Run verify_release.py locally (dry run, no outputs)
+    cmds:
+      - python3 scripts/verify_release.py
+    env:
+      GITHUB_OUTPUT: /dev/null
+
+  trigger:
+    desc: Manually trigger the build pipeline
+    cmds:
+      - gh workflow run build.yml --repo {{.THIS_REPO}}
+    vars:
+      THIS_REPO:
+        sh: gh repo view --json nameWithOwner -q .nameWithOwner
