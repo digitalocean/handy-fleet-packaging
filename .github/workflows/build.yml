@@ -132,6 +132,11 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${{ needs.check.outputs.tag }}"
+          # Delete existing release if force-rebuilding
+          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Deleting existing release $TAG for rebuild..."
+            gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          fi
           gh release create "$TAG" \
             --repo "${{ github.repository }}" \
             --title "Handy ${TAG} (packaged)" \
