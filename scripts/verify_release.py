@@ -113,11 +113,16 @@ def main():
     tag = release["tag_name"]
     published_at = release["published_at"]
 
-    if already_built(tag):
+    force = os.environ.get("FORCE", "0") == "1"
+
+    if already_built(tag) and not force:
         print(f"{tag} already built.")
         set_output("ready", "false")
         set_output("tag", tag)
         return 0
+
+    if force:
+        print(f"FORCE mode — rebuilding {tag}")
 
     age_days = release_age_days(published_at)
     if age_days < AGE_GATE_DAYS:
